@@ -2,7 +2,6 @@ package com.example.FlightBooking.service;
 
 import com.example.FlightBooking.model.Flight;
 import com.example.FlightBooking.repository.FlightRepository;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -44,15 +43,19 @@ public class FlightService {
         return flightRepository.deleteById(id);
     }
 
-    public Mono<Flight> updateSeats(Long flightId, Integer seats) {
+    public Mono<Flight> updateSeats(Long flightId, Integer seats, boolean isBooking) {
         return flightRepository.findById(flightId)
                 .flatMap(flight -> {
-                    if (flight.getSeatsAvailable() >= seats) {
-                        flight.setSeatsAvailable(flight.getSeatsAvailable() - seats);
-                        return flightRepository.save(flight);
-                    } else {
+                    int newSeatsAvailable = isBooking
+                            ? flight.getSeatsAvailable() - seats
+                            : flight.getSeatsAvailable() + seats;
+
+                    if (newSeatsAvailable < 0) {
                         return Mono.error(new RuntimeException("Not enough seats available"));
                     }
+
+                    flight.setSeatsAvailable(newSeatsAvailable);
+                    return flightRepository.save(flight);
                 });
     }
 }

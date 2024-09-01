@@ -2,7 +2,7 @@ package com.example.FlightBooking.service;
 
 import com.example.FlightBooking.model.Booking;
 import com.example.FlightBooking.repository.BookingRepository;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -11,27 +11,32 @@ import reactor.core.publisher.Mono;
 public class BookingService {
     private final BookingRepository bookingRepository;
     private final FlightService flightService;
+    private final KafkaTemplate<String, String> kafkaTemplate;
 
-    public BookingService(BookingRepository bookingRepository, FlightService flightService) {
+    public BookingService(BookingRepository bookingRepository, FlightService flightService, KafkaTemplate<String, String> kafkaTemplate) {
         this.bookingRepository = bookingRepository;
         this.flightService = flightService;
+        this.kafkaTemplate = kafkaTemplate;
     }
 
     public Mono<Booking> createBooking(Booking booking) {
-        return flightService.updateSeats(booking.getFlightId(), 1) // Assume one seat per booking
-                .then(bookingRepository.save(booking)
-                        .flatMap(savedBooking -> {
-                            savedBooking.setStatus("confirmed");
-                            return bookingRepository.save(savedBooking);
-                        }));
+        return flightService.updateSeats(booking.getFlightId(), 1, true)
+                .flatMap(flight -> {
+                    booking.setStatus("confirmed");
+                    return bookingRepository.save(booking)
+                            .doOnSuccess(savedBooking -> kafkaTemplate.send("booking-topic", "Booking Created: " + savedBooking));
+                });
     }
 
-    public Mono<Booking> cancelBooking(Long id) {
-        return bookingRepository.findById(id)
-                .flatMap(existingBooking -> {
-                    existingBooking.setStatus("cancelled");
-                    return flightService.updateSeats(existingBooking.getFlightId(), 1)
-                            .then(bookingRepository.save(existingBooking));
+    public Mono<Booking> cancelBooking(Long bookingId) {
+        return bookingRepository.findById(bookingId)
+                .flatMap(booking -> {
+                    return flightService.updateSeats(booking.getFlightId(), 1, false)
+                            .flatMap(flight -> {
+                                booking.setStatus("cancelled");
+                                return bookingRepository.save(booking)
+                                        .doOnSuccess(savedBooking -> kafkaTemplate.send("booking-topic", "Booking Cancelled: " + savedBooking));
+                            });
                 });
     }
 
